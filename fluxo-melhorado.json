@@ -1,0 +1,513 @@
+{
+  "name": "WhatsApp Conversa com Estado - Evolution API",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "whatsapp-webhook",
+        "method": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "WebhookTrigger",
+      "name": "Webhook - Receber Mensagens",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extrair dados da mensagem\nconst body = items[0].json.body;\nconst message = body.messages?.[0];\n\nif (!message) {\n  return [{ json: { error: 'Nenhuma mensagem encontrada' } }];\n}\n\nconst from = message.from;\nconst messageType = message.messageType;\nlet userInput = '';\nlet isListReply = false;\n\n// Verificar se é resposta de lista interativa\nif (message.interactive?.list_reply) {\n  userInput = message.interactive.list_reply.id;\n  isListReply = true;\n} else if (message.text) {\n  userInput = message.text;\n}\n\nreturn [{\n  json: {\n    from: from,\n    userInput: userInput,\n    isListReply: isListReply,\n    messageType: messageType,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "ProcessMessage",
+      "name": "Processar Mensagem",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "sheetId": "{{ $vars.GOOGLE_SHEET_ID }}",
+        "range": "Estados!A:E",
+        "lookupColumn": "from",
+        "lookupValue": "={{ $json.from }}",
+        "options": {
+          "returnAllMatches": false
+        }
+      },
+      "id": "GetUserState",
+      "name": "Buscar Estado do Usuário",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.step }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "CheckIfNewUser",
+      "name": "Usuário Novo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendList",
+        "chatId": "={{ $('ProcessMessage').item.json.from }}",
+        "title": "Bem-vindo! Escolha uma especialidade:",
+        "description": "Selecione a especialidade médica desejada",
+        "buttonText": "Ver Especialidades",
+        "footerText": "MedEvo - Sistema de Agendamento",
+        "sections": [
+          {
+            "title": "Especialidades Disponíveis",
+            "rows": [
+              {
+                "id": "pediatria",
+                "title": "Pediatria",
+                "description": "Cuidados médicos para crianças"
+              },
+              {
+                "id": "clinica_geral",
+                "title": "Clínica Geral",
+                "description": "Atendimento médico geral"
+              },
+              {
+                "id": "cardiologia",
+                "title": "Cardiologia",
+                "description": "Especialista em coração"
+              },
+              {
+                "id": "dermatologia",
+                "title": "Dermatologia",
+                "description": "Cuidados com a pele"
+              }
+            ]
+          }
+        ]
+      },
+      "id": "SendWelcomeList",
+      "name": "Enviar Lista de Boas-vindas",
+      "type": "n8n-nodes-evolutionapi.EvolutionApi",
+      "typeVersion": 1,
+      "position": [1000, 200]
+    },
+    {
+      "parameters": {
+        "sheetId": "{{ $vars.GOOGLE_SHEET_ID }}",
+        "range": "Estados!A:E",
+        "valueInputMode": "append",
+        "options": {},
+        "data": [
+          {
+            "field": "from",
+            "value": "={{ $('ProcessMessage').item.json.from }}"
+          },
+          {
+            "field": "step",
+            "value": "aguardando_especialidade"
+          },
+          {
+            "field": "data",
+            "value": "{}"
+          },
+          {
+            "field": "timestamp",
+            "value": "={{ $('ProcessMessage').item.json.timestamp }}"
+          },
+          {
+            "field": "status",
+            "value": "ativo"
+          }
+        ]
+      },
+      "id": "SaveNewUserState",
+      "name": "Salvar Estado Novo Usuário",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1200, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.step }}",
+              "rightValue": "aguardando_especialidade",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "CheckAwaitingSpecialty",
+      "name": "Aguardando Especialidade?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('ProcessMessage').item.json.isListReply }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "CheckIsListReply",
+      "name": "É Resposta de Lista?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1200, 400]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $('ProcessMessage').item.json.userInput }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "pediatria",
+              "output": 0
+            },
+            {
+              "value2": "clinica_geral",
+              "output": 1
+            },
+            {
+              "value2": "cardiologia",
+              "output": 2
+            },
+            {
+              "value2": "dermatologia",
+              "output": 3
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "SwitchSpecialty",
+      "name": "Switch Especialidade",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1400, 400]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('ProcessMessage').item.json.from }}",
+        "text": "✅ Pediatria selecionada!\n\nAgora vamos agendar sua consulta. Qual data você prefere?\n\n📅 Digite a data no formato: DD/MM/AAAA"
+      },
+      "id": "ReplyPediatria",
+      "name": "Resposta Pediatria",
+      "type": "n8n-nodes-evolutionapi.EvolutionApi",
+      "typeVersion": 1,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('ProcessMessage').item.json.from }}",
+        "text": "✅ Clínica Geral selecionada!\n\nAgora vamos agendar sua consulta. Qual data você prefere?\n\n📅 Digite a data no formato: DD/MM/AAAA"
+      },
+      "id": "ReplyClinicaGeral",
+      "name": "Resposta Clínica Geral",
+      "type": "n8n-nodes-evolutionapi.EvolutionApi",
+      "typeVersion": 1,
+      "position": [1600, 400]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('ProcessMessage').item.json.from }}",
+        "text": "✅ Cardiologia selecionada!\n\nAgora vamos agendar sua consulta. Qual data você prefere?\n\n📅 Digite a data no formato: DD/MM/AAAA"
+      },
+      "id": "ReplyCardiologia",
+      "name": "Resposta Cardiologia",
+      "type": "n8n-nodes-evolutionapi.EvolutionApi",
+      "typeVersion": 1,
+      "position": [1600, 500]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('ProcessMessage').item.json.from }}",
+        "text": "✅ Dermatologia selecionada!\n\nAgora vamos agendar sua consulta. Qual data você prefere?\n\n📅 Digite a data no formato: DD/MM/AAAA"
+      },
+      "id": "ReplyDermatologia",
+      "name": "Resposta Dermatologia",
+      "type": "n8n-nodes-evolutionapi.EvolutionApi",
+      "typeVersion": 1,
+      "position": [1600, 600]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "sheetId": "{{ $vars.GOOGLE_SHEET_ID }}",
+        "range": "Estados!A:E",
+        "keyRow": 1,
+        "dataStartRow": 2,
+        "keyColumn": "from",
+        "keyValue": "={{ $('ProcessMessage').item.json.from }}",
+        "options": {},
+        "data": [
+          {
+            "field": "step",
+            "value": "aguardando_data"
+          },
+          {
+            "field": "data",
+            "value": "={{ JSON.stringify({ especialidade: $('ProcessMessage').item.json.userInput }) }}"
+          },
+          {
+            "field": "timestamp",
+            "value": "={{ $('ProcessMessage').item.json.timestamp }}"
+          }
+        ]
+      },
+      "id": "UpdateUserState",
+      "name": "Atualizar Estado do Usuário",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1800, 450]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('ProcessMessage').item.json.from }}",
+        "text": "❌ Opção inválida!\n\nPor favor, selecione uma das especialidades da lista enviada anteriormente."
+      },
+      "id": "InvalidOption",
+      "name": "Opção Inválida",
+      "type": "n8n-nodes-evolutionapi.EvolutionApi",
+      "typeVersion": 1,
+      "position": [1400, 600]
+    }
+  ],
+  "connections": {
+    "WebhookTrigger": {
+      "main": [
+        [
+          {
+            "node": "ProcessMessage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ProcessMessage": {
+      "main": [
+        [
+          {
+            "node": "GetUserState",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GetUserState": {
+      "main": [
+        [
+          {
+            "node": "CheckIfNewUser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CheckIfNewUser": {
+      "main": [
+        [
+          {
+            "node": "SendWelcomeList",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CheckAwaitingSpecialty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SendWelcomeList": {
+      "main": [
+        [
+          {
+            "node": "SaveNewUserState",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CheckAwaitingSpecialty": {
+      "main": [
+        [
+          {
+            "node": "CheckIsListReply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CheckIsListReply": {
+      "main": [
+        [
+          {
+            "node": "SwitchSpecialty",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "InvalidOption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SwitchSpecialty": {
+      "main": [
+        [
+          {
+            "node": "ReplyPediatria",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ReplyClinicaGeral",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ReplyCardiologia",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ReplyDermatologia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ReplyPediatria": {
+      "main": [
+        [
+          {
+            "node": "UpdateUserState",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ReplyClinicaGeral": {
+      "main": [
+        [
+          {
+            "node": "UpdateUserState",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ReplyCardiologia": {
+      "main": [
+        [
+          {
+            "node": "UpdateUserState",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ReplyDermatologia": {
+      "main": [
+        [
+          {
+            "node": "UpdateUserState",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-17T00:00:00.000Z",
+  "versionId": "1"
+}
